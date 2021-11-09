@@ -1928,6 +1928,70 @@ static int xen_pt_msix_size_init(XenPCIPassthroughState *s,
     return 0;
 }
 
+/* get Advanced Error Reporting Extended Capability register group size */
+#define PCI_ERR_CAP_TLP_PREFIX_LOG      (1U << 11)
+#define PCI_DEVCAP2_END_END_TLP_PREFIX  (1U << 21)
+static int xen_pt_ext_cap_aer_size_init(XenPCIPassthroughState *s,
+                                        const XenPTRegGroupInfo *grp_reg,
+                                        uint32_t base_offset,
+                                        uint32_t *size)
+{
+    uint8_t dev_type = get_pcie_device_type(s);
+    uint32_t aer_caps = 0;
+    uint32_t sz = 0;
+    int pcie_cap_pos;
+    uint32_t devcaps2;
+    int ret = 0;
+
+    pcie_cap_pos = xen_host_pci_find_next_cap(&s->real_device, 0,
+                                              PCI_CAP_ID_EXP);
+    if (!pcie_cap_pos) {
+        XEN_PT_ERR(&s->dev,
+                   "Cannot find a required PCI Express Capability\n");
+        return -1;
+    }
+
+    if (get_pcie_capability_version(s) > 1) {
+        ret = xen_host_pci_get_long(&s->real_device,
+                                    pcie_cap_pos + PCI_EXP_DEVCAP2,
+                                    &devcaps2);
+        if (ret) {
+            XEN_PT_ERR(&s->dev, "Error while reading Device "
+                       "Capabilities 2 Register \n");
+            return -1;
+        }
+    }
+
+    if (devcaps2 & PCI_DEVCAP2_END_END_TLP_PREFIX) {
+        ret = xen_host_pci_get_long(&s->real_device,
+                                    base_offset + PCI_ERR_CAP,
+                                    &aer_caps);
+        if (ret) {
+            XEN_PT_ERR(&s->dev,
+                       "Error while reading AER Extended Capability\n");
+            return -1;
+        }
+
+        if (aer_caps & PCI_ERR_CAP_TLP_PREFIX_LOG) {
+            sz = 0x48;
+        }
+    }
+
+    if (!sz) {
+        if (dev_type == PCI_EXP_TYPE_ROOT_PORT ||
+            dev_type == PCI_EXP_TYPE_RC_EC) {
+            sz = 0x38;
+        } else {
+            sz = 0x2C;
+        }
+    }
+
+    *size = sz;
+
+    log_pcie_extended_cap(s, "AER", base_offset, *size);
+    return ret;
+}
+
 
 static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
     /* Header Type0 reg group */
@@ -2194,6 +2258,14 @@ static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
         .grp_type   = XEN_PT_GRP_TYPE_EMU,
         .grp_size   = 0x0C,
         .size_init  = xen_pt_reg_grp_size_init,
+        .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
+    },
+    /* Advanced Error Reporting Extended Capability reg group */
+    {
+        .grp_id     = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_ERR),
+        .grp_type   = XEN_PT_GRP_TYPE_EMU,
+        .grp_size   = 0xFF,
+        .size_init  = xen_pt_ext_cap_aer_size_init,
         .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
     },
     {
