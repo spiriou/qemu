@@ -34,6 +34,11 @@ void xen_pt_log(const PCIDevice *d, const char *f, ...) GCC_FMT_ATTR(2, 3);
 /* Helper */
 #define XEN_PFN(x) ((x) >> XC_PAGE_SHIFT)
 
+/* Macro's for PCIe Extended Capabilities */
+#define PCIE_EXT_CAP_ID(cap_id)     ((cap_id) | (1U << 16))
+#define IS_PCIE_EXT_CAP_ID(grp_id)  ((grp_id) & (1U << 16))
+#define GET_PCIE_EXT_CAP_ID(grp_id) ((grp_id) & 0xFFFF)
+
 typedef const struct XenPTRegInfo XenPTRegInfo;
 typedef struct XenPTReg XenPTReg;
 
@@ -153,13 +158,13 @@ typedef const struct XenPTRegGroupInfo XenPTRegGroupInfo;
 /* emul reg group size initialize method */
 typedef int (*xen_pt_reg_size_init_fn)
     (XenPCIPassthroughState *, XenPTRegGroupInfo *,
-     uint32_t base_offset, uint8_t *size);
+     uint32_t base_offset, uint32_t *size);
 
 /* emulated register group information */
 struct XenPTRegGroupInfo {
-    uint8_t grp_id;
+    uint32_t grp_id;
     XenPTRegisterGroupType grp_type;
-    uint8_t grp_size;
+    uint32_t grp_size;
     xen_pt_reg_size_init_fn size_init;
     XenPTRegInfo *emu_regs;
 };
@@ -169,7 +174,7 @@ typedef struct XenPTRegGroup {
     QLIST_ENTRY(XenPTRegGroup) entries;
     XenPTRegGroupInfo *reg_grp;
     uint32_t base_offset;
-    uint8_t size;
+    uint32_t size;
     QLIST_HEAD(, XenPTReg) reg_tbl_list;
 } XenPTRegGroup;
 

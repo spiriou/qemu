@@ -95,10 +95,20 @@ void xen_pt_log(const PCIDevice *d, const char *f, ...)
 
 /* Config Space */
 
-static int xen_pt_pci_config_access_check(PCIDevice *d, uint32_t addr, int len)
+static int xen_pt_pci_config_access_check(PCIDevice *d,
+                                          uint32_t addr, int len)
 {
+    XenPCIPassthroughState *s = XEN_PT_DEVICE(d);
+
     /* check offset range */
-    if (addr > 0xFF) {
+    if (s->pcie_enabled_dev) {
+        if (addr >= PCIE_CONFIG_SPACE_SIZE) {
+            XEN_PT_ERR(d, "Failed to access register with offset "
+                          "exceeding 0xFFF. (addr: 0x%02x, len: %d)\n",
+                          addr, len);
+            return -1;
+        }
+    } else if (addr >= PCI_CONFIG_SPACE_SIZE) {
         XEN_PT_ERR(d, "Failed to access register with offset exceeding 0xFF. "
                    "(addr: 0x%02x, len: %d)\n", addr, len);
         return -1;

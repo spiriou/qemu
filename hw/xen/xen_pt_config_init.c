@@ -32,29 +32,42 @@ static int xen_pt_ptr_reg_init(XenPCIPassthroughState *s, XenPTRegInfo *reg,
 /* helper */
 
 /* A return value of 1 means the capability should NOT be exposed to guest. */
-static int xen_pt_hide_dev_cap(const XenHostPCIDevice *d, uint8_t grp_id)
+static int xen_pt_hide_dev_cap(const XenHostPCIDevice *d, uint32_t grp_id)
 {
-    switch (grp_id) {
-    case PCI_CAP_ID_EXP:
-        /* The PCI Express Capability Structure of the VF of Intel 82599 10GbE
-         * Controller looks trivial, e.g., the PCI Express Capabilities
-         * Register is 0. We should not try to expose it to guest.
-         *
-         * The datasheet is available at
-         * http://download.intel.com/design/network/datashts/82599_datasheet.pdf
-         *
-         * See 'Table 9.7. VF PCIe Configuration Space' of the datasheet, the
-         * PCI Express Capability Structure of the VF of Intel 82599 10GbE
-         * Controller looks trivial, e.g., the PCI Express Capabilities
-         * Register is 0, so the Capability Version is 0 and
-         * xen_pt_pcie_size_init() would fail.
-         */
-        if (d->vendor_id == PCI_VENDOR_ID_INTEL &&
-            d->device_id == PCI_DEVICE_ID_INTEL_82599_SFP_VF) {
-            return 1;
+    if (IS_PCIE_EXT_CAP_ID(grp_id)) {
+        switch (GET_PCIE_EXT_CAP_ID(grp_id)) {
+            /* Here can be added device-specific filtering
+             * for PCIe Extended capabilities (those with offset >= 0x100).
+             * This is simply a placeholder as no filtering needed for now.
+             */
+        default:
+            break;
         }
-        break;
+    } else {
+        /* basic PCI capability */
+        switch (grp_id) {
+        case PCI_CAP_ID_EXP:
+            /* The PCI Express Capability Structure of the VF of Intel 82599 10GbE
+             * Controller looks trivial, e.g., the PCI Express Capabilities
+             * Register is 0. We should not try to expose it to guest.
+             *
+             * The datasheet is available at
+             * http://download.intel.com/design/network/datashts/82599_datasheet.pdf
+             *
+             * See 'Table 9.7. VF PCIe Configuration Space' of the datasheet, the
+             * PCI Express Capability Structure of the VF of Intel 82599 10GbE
+             * Controller looks trivial, e.g., the PCI Express Capabilities
+             * Register is 0, so the Capability Version is 0 and
+             * xen_pt_pcie_size_init() would fail.
+             */
+            if (d->vendor_id == PCI_VENDOR_ID_INTEL &&
+                d->device_id == PCI_DEVICE_ID_INTEL_82599_SFP_VF) {
+                return 1;
+            }
+            break;
+        }
     }
+
     return 0;
 }
 
@@ -1626,7 +1639,7 @@ static XenPTRegInfo xen_pt_emu_reg_igd_opregion[] = {
 
 static int xen_pt_reg_grp_size_init(XenPCIPassthroughState *s,
                                     const XenPTRegGroupInfo *grp_reg,
-                                    uint32_t base_offset, uint8_t *size)
+                                    uint32_t base_offset, uint32_t *size)
 {
     *size = grp_reg->grp_size;
     return 0;
@@ -1634,14 +1647,18 @@ static int xen_pt_reg_grp_size_init(XenPCIPassthroughState *s,
 /* get Vendor Specific Capability Structure register group size */
 static int xen_pt_vendor_size_init(XenPCIPassthroughState *s,
                                    const XenPTRegGroupInfo *grp_reg,
-                                   uint32_t base_offset, uint8_t *size)
+                                   uint32_t base_offset, uint32_t *size)
 {
-    return xen_host_pci_get_byte(&s->real_device, base_offset + 0x02, size);
+    uint8_t sz = 0;
+    int ret = xen_host_pci_get_byte(&s->real_device, base_offset + 0x02, &sz);
+
+    *size = sz;
+    return ret;
 }
 /* get PCI Express Capability Structure register group size */
 static int xen_pt_pcie_size_init(XenPCIPassthroughState *s,
                                  const XenPTRegGroupInfo *grp_reg,
-                                 uint32_t base_offset, uint8_t *size)
+                                 uint32_t base_offset, uint32_t *size)
 {
     PCIDevice *d = PCI_DEVICE(s);
     uint8_t version = get_pcie_capability_version(s);
@@ -1713,7 +1730,7 @@ static int xen_pt_pcie_size_init(XenPCIPassthroughState *s,
 /* get MSI Capability Structure register group size */
 static int xen_pt_msi_size_init(XenPCIPassthroughState *s,
                                 const XenPTRegGroupInfo *grp_reg,
-                                uint32_t base_offset, uint8_t *size)
+                                uint32_t base_offset, uint32_t *size)
 {
     uint16_t msg_ctrl = 0;
     uint8_t msi_size = 0xa;
@@ -1741,7 +1758,7 @@ static int xen_pt_msi_size_init(XenPCIPassthroughState *s,
 /* get MSI-X Capability Structure register group size */
 static int xen_pt_msix_size_init(XenPCIPassthroughState *s,
                                  const XenPTRegGroupInfo *grp_reg,
-                                 uint32_t base_offset, uint8_t *size)
+                                 uint32_t base_offset, uint32_t *size)
 {
     int rc = 0;
 
@@ -1924,44 +1941,20 @@ out:
  * Main
  */
 
-static uint8_t find_cap_offset(XenPCIPassthroughState *s, uint8_t cap)
+static uint32_t find_cap_offset(XenPCIPassthroughState *s, uint32_t cap)
 {
-    uint8_t id;
-    unsigned max_cap = XEN_PCI_CAP_MAX;
-    uint8_t pos = PCI_CAPABILITY_LIST;
-    uint8_t status = 0;
+    uint32_t retval = 0;
 
-    if (xen_host_pci_get_byte(&s->real_device, PCI_STATUS, &status)) {
-        return 0;
+    if (IS_PCIE_EXT_CAP_ID(cap)) {
+        if (s->pcie_enabled_dev) {
+            retval = xen_host_pci_find_next_ext_cap(&s->real_device, 0,
+                                                    GET_PCIE_EXT_CAP_ID(cap));
+        }
+    } else {
+        retval = xen_host_pci_find_next_cap(&s->real_device, 0, cap);
     }
-    if ((status & PCI_STATUS_CAP_LIST) == 0) {
-        return 0;
-    }
 
-    while (max_cap--) {
-        if (xen_host_pci_get_byte(&s->real_device, pos, &pos)) {
-            break;
-        }
-        if (pos < PCI_CONFIG_HEADER_SIZE) {
-            break;
-        }
-
-        pos &= ~3;
-        if (xen_host_pci_get_byte(&s->real_device,
-                                  pos + PCI_CAP_LIST_ID, &id)) {
-            break;
-        }
-
-        if (id == 0xff) {
-            break;
-        }
-        if (id == cap) {
-            return pos;
-        }
-
-        pos += PCI_CAP_LIST_NEXT;
-    }
-    return 0;
+    return retval;
 }
 
 static void xen_pt_config_reg_init(XenPCIPassthroughState *s,
