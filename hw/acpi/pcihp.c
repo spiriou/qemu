@@ -110,6 +110,8 @@ static void acpi_set_pci_info(void)
     PCIBus *bus;
     unsigned bsel_alloc = ACPI_PCIHP_BSEL_DEFAULT;
 
+    fprintf(stderr, "%s: entry %d %p\n", bsel_is_set, host);
+
     if (bsel_is_set) {
         return;
     }
