@@ -906,6 +906,55 @@ static int xen_pt_linkctrl2_reg_init(XenPCIPassthroughState *s,
     *data = reg_field;
     return 0;
 }
+/* initialize PCI Express Capabilities register */
+static int xen_pt_pcie_capabilities_reg_init(XenPCIPassthroughState *s,
+                                             XenPTRegInfo *reg,
+                                             uint32_t real_offset,
+                                             uint32_t *data)
+{
+    uint8_t dev_type = get_pcie_device_type(s);
+    uint16_t reg_field;
+
+    if (xen_host_pci_get_word(&s->real_device,
+                             real_offset - reg->offset + PCI_EXP_FLAGS,
+                             &reg_field)) {
+        XEN_PT_ERR(&s->dev, "Error reading PCIe Capabilities reg\n");
+        *data = 0;
+        return 0;
+    }
+
+    /*
+     * Q35 workaround for Win7+ pci.sys PCIe topology check.
+     * As our PT device currently located on a bus 0, fake the
+     * device/port type field to the "Root Complex integrated device"
+     * value to bypass the check
+     */
+    switch (dev_type) {
+    case PCI_EXP_TYPE_ENDPOINT:
+    case PCI_EXP_TYPE_LEG_END:
+        XEN_PT_LOG(&s->dev, "Original PCIe Capabilities reg is 0x%04X\n",
+            reg_field);
+        reg_field &= ~PCI_EXP_FLAGS_TYPE;
+        reg_field |= ((PCI_EXP_TYPE_RC_END /*9*/ << 4) & PCI_EXP_FLAGS_TYPE);
+        XEN_PT_LOG(&s->dev, "Q35 PCIe topology check workaround: "
+                   "faking Capabilities reg to 0x%04X\n", reg_field);
+        break;
+
+    case PCI_EXP_TYPE_ROOT_PORT:
+    case PCI_EXP_TYPE_UPSTREAM:
+    case PCI_EXP_TYPE_DOWNSTREAM:
+    case PCI_EXP_TYPE_PCI_BRIDGE:
+    case PCI_EXP_TYPE_PCIE_BRIDGE:
+    case PCI_EXP_TYPE_RC_END:
+    case PCI_EXP_TYPE_RC_EC:
+    default:
+        /* do nothing, return as is */
+        break;
+    }
+
+    *data = reg_field;
+    return 0;
+}
 
 /* PCI Express Capability Structure reg static information table */
 static XenPTRegInfo xen_pt_emu_reg_pcie[] = {
@@ -919,6 +968,17 @@ static XenPTRegInfo xen_pt_emu_reg_pcie[] = {
         .init       = xen_pt_ptr_reg_init,
         .u.b.read   = xen_pt_byte_reg_read,
         .u.b.write  = xen_pt_byte_reg_write,
+    },
+    /* PCI Express Capabilities Register */
+    {
+        .offset     = PCI_EXP_FLAGS,
+        .size       = 2,
+        .init_val   = 0x0000,
+        .ro_mask    = 0xFFFF,
+        .emu_mask   = 0xFFFF,
+        .init       = xen_pt_pcie_capabilities_reg_init,
+        .u.w.read   = xen_pt_word_reg_read,
+        .u.w.write  = xen_pt_word_reg_write,
     },
     /* Device Capabilities reg */
     {
