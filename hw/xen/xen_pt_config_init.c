@@ -2160,6 +2160,26 @@ static int xen_pt_ext_cap_pmux_size_init(XenPCIPassthroughState *s,
     return ret;
 }
 
+/* get Resizable BAR Extended Capability register group size */
+static int xen_pt_ext_cap_rebar_size_init(XenPCIPassthroughState *s,
+                                          const XenPTRegGroupInfo *grp_reg,
+                                          uint32_t base_offset,
+                                          uint32_t *size)
+{
+    uint32_t rebar_ctl = 0;
+    uint32_t num_entries;
+
+    int ret = xen_host_pci_get_long(&s->real_device,
+                                    base_offset + PCI_REBAR_CTRL,
+                                    &rebar_ctl);
+    num_entries =
+        (rebar_ctl & PCI_REBAR_CTRL_NBAR_MASK) >> PCI_REBAR_CTRL_NBAR_SHIFT;
+
+    *size = num_entries*8 + 4;
+
+    log_pcie_extended_cap(s, "Resizable BAR", base_offset, *size);
+    return ret;
+}
 
 static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
     /* Header Type0 reg group */
@@ -2491,6 +2511,13 @@ static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
         .grp_size   = 0xFF,
         .size_init  = xen_pt_ext_cap_dpc_size_init,
         .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
+    },
+    /* Resizable BAR Extended Capability reg group */
+    {
+        .grp_id     = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_REBAR),
+        .grp_type   = XEN_PT_GRP_TYPE_HARDWIRED,
+        .grp_size   = 0xFF,
+        .size_init  = xen_pt_ext_cap_rebar_size_init,
     },
     {
         .grp_size = 0,
