@@ -167,7 +167,16 @@ static uint32_t xen_pt_pci_read_config(PCIDevice *d, uint32_t addr, int len)
     reg_grp_entry = xen_pt_find_reg_grp(s, addr);
     if (reg_grp_entry) {
         /* check 0-Hardwired register group */
-        if (reg_grp_entry->reg_grp->grp_type == XEN_PT_GRP_TYPE_HARDWIRED) {
+        if (reg_grp_entry->reg_grp->grp_type == XEN_PT_GRP_TYPE_HARDWIRED &&
+            /*
+             * For PCIe Extended Capabilities we need to emulate
+             * CapabilityID and NextCapability/Version registers for a
+             * hardwired reg group located at the offset 0x100 in PCIe
+             * config space. This allows us to hide the first extended
+             * capability as well.
+             */
+            !(reg_grp_entry->base_offset == PCI_CONFIG_SPACE_SIZE &&
+            ranges_overlap(addr, len, 0x100, 4))) {
             /* no need to emulate, just return 0 */
             val = 0;
             goto exit;

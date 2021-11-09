@@ -31,6 +31,10 @@ static int xen_pt_ext_cap_ptr_reg_init(XenPCIPassthroughState *s,
                                        XenPTRegInfo *reg,
                                        uint32_t real_offset,
                                        uint32_t *data);
+static int xen_pt_ext_cap_capid_reg_init(XenPCIPassthroughState *s,
+                                         XenPTRegInfo *reg,
+                                         uint32_t real_offset,
+                                         uint32_t *data);
 
 /* helper */
 
@@ -1634,6 +1638,56 @@ static XenPTRegInfo xen_pt_emu_reg_igd_opregion[] = {
     },
 };
 
+
+/****************************
+ * Emulated registers for
+ * PCIe Extended Capabilities
+ */
+
+static uint16_t fake_cap_id = XEN_PCIE_FAKE_CAP_ID_BASE;
+
+/* PCIe Extended Capability ID reg */
+static int xen_pt_ext_cap_capid_reg_init(XenPCIPassthroughState *s,
+                                         XenPTRegInfo *reg,
+                                         uint32_t real_offset,
+                                         uint32_t *data)
+{
+    uint16_t reg_field;
+    int rc;
+    XenPTRegGroup *reg_grp_entry = NULL;
+
+    /* use real device register's value as initial value */
+    rc = xen_host_pci_get_word(&s->real_device, real_offset, &reg_field);
+    if (rc) {
+        return rc;
+    }
+
+    reg_grp_entry = xen_pt_find_reg_grp(s, real_offset);
+
+    if (reg_grp_entry) {
+        if (reg_grp_entry->reg_grp->grp_type == XEN_PT_GRP_TYPE_HARDWIRED &&
+            reg_grp_entry->base_offset == PCI_CONFIG_SPACE_SIZE) {
+            /*
+             * This is the situation when we were asked to hide (aka
+             * "hardwire to 0") some PCIe ext capability, but it was located
+             * at offset 0x100 in PCIe config space. In this case we can't
+             * simply exclude it from the linked list of capabilities
+             * (as it is the first entry in the list), so we must fake its
+             * Capability ID in PCIe Extended Capability header, leaving
+             * the Next Ptr field intact while returning zeroes on attempts
+             * to read capability body (writes are ignored).
+             */
+            reg_field = fake_cap_id;
+            /* increment the value in order to have unique Capability IDs */
+            fake_cap_id++;
+        }
+    }
+
+    *data = reg_field;
+    return 0;
+}
+
+
 /****************************
  * Capabilities
  */
@@ -2176,7 +2230,13 @@ void xen_pt_config_init(XenPCIPassthroughState *s, Error **errp)
             }
         }
 
-        if (xen_pt_emu_reg_grps[i].grp_type == XEN_PT_GRP_TYPE_EMU) {
+        if (xen_pt_emu_reg_grps[i].grp_type == XEN_PT_GRP_TYPE_EMU ||
+            /*
+             * We need to always emulate the PCIe Extended Capability
+             * header for a hidden capability which starts at offset 0x100
+             */
+            (xen_pt_emu_reg_grps[i].grp_type == XEN_PT_GRP_TYPE_HARDWIRED &&
+            reg_grp_offset == 0x100)) {
             if (xen_pt_emu_reg_grps[i].emu_regs) {
                 int j = 0;
                 XenPTRegInfo *regs = xen_pt_emu_reg_grps[i].emu_regs;
