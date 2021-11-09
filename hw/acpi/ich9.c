@@ -39,6 +39,7 @@
 #include "hw/i386/ich9.h"
 #include "hw/mem/pc-dimm.h"
 #include "hw/mem/nvdimm.h"
+#include "hw/xen/xen.h"
 
 //#define DEBUG
 
@@ -280,6 +281,7 @@ static void pm_reset(void *opaque)
     }
     pm->smi_en_wmask = ~0;
 
+    fprintf(stderr, "%s: use_acpi_hotplug_bridge %d\n", __func__, pm->use_acpi_hotplug_bridge);
     if (pm->use_acpi_hotplug_bridge) {
         acpi_pcihp_reset(&pm->acpi_pci_hotplug, true);
     }
@@ -322,6 +324,8 @@ void ich9_pm_init(PCIDevice *lpc_pci, ICH9LPCPMRegs *pm,
     pm->enable_tco = true;
     acpi_pm_tco_init(&pm->tco_regs, &pm->io);
 
+
+    fprintf(stderr, "%s: use_acpi_hotplug_bridge %d\n", __func__, pm->use_acpi_hotplug_bridge);
     if (pm->use_acpi_hotplug_bridge) {
         acpi_pcihp_init(OBJECT(lpc_pci),
                         &pm->acpi_pci_hotplug,
@@ -332,6 +336,9 @@ void ich9_pm_init(PCIDevice *lpc_pci, ICH9LPCPMRegs *pm,
 
         qbus_set_hotplug_handler(BUS(pci_get_bus(lpc_pci)),
                                  OBJECT(lpc_pci));
+
+        // FIXME
+        acpi_set_pci_info();
     }
 
     pm->irq = sci_irq;

@@ -71,6 +71,8 @@ void acpi_pcihp_device_unplug_request_cb(HotplugHandler *hotplug_dev,
 /* Called on reset */
 void acpi_pcihp_reset(AcpiPciHpState *s, bool acpihp_root_off);
 
+void acpi_set_pci_info(void);
+
 extern const VMStateDescription vmstate_acpi_pcihp_pci_status;
 
 bool vmstate_acpi_pcihp_use_acpi_index(void *opaque, int version_id);

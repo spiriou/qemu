@@ -103,7 +103,7 @@ static void *acpi_set_bsel(PCIBus *bus, void *opaque)
     return bsel_alloc;
 }
 
-static void acpi_set_pci_info(void)
+void acpi_set_pci_info(void)
 {
     static bool bsel_is_set;
     Object *host = acpi_get_i386_pci_host();
