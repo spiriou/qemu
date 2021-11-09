@@ -111,6 +111,18 @@ static int ehci_create_ich9_with_companions(PCIBus *bus, int slot)
     return 0;
 }
 
+static void q35_xen_hvm_init(MachineState *machine)
+{
+    PCMachineState *pcms = PC_MACHINE(machine);
+
+    if (xen_enabled()) {
+        /* check if Xen Platform device is enabled */
+        if (machine->xen_platform_dev) {
+            pci_create_simple(pcms->bus, -1, "xen-platform");
+        }
+    }
+}
+
 /* PC hardware initialisation */
 static void pc_q35_init(MachineState *machine)
 {
@@ -264,6 +276,7 @@ static void pc_q35_init(MachineState *machine)
     if (xen_enabled()) {
         pci_bus_irqs(host_bus, xen_cmn_set_irq, xen_cmn_pci_slot_get_pirq,
                      ich9_lpc, ICH9_XEN_NUM_IRQ_SOURCES);
+        q35_xen_hvm_init(machine);
     } else {
         pci_bus_irqs(host_bus, ich9_lpc_set_irq, ich9_lpc_map_irq, ich9_lpc,
                      ICH9_LPC_NB_PIRQS);
