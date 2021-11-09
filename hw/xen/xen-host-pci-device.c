@@ -401,6 +401,7 @@ void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
 {
     ERRP_GUARD();
     unsigned int v;
+    int pcie_cap_pos;
 
     d->config_fd = -1;
     d->domain = domain;
@@ -444,6 +445,20 @@ void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
 
     d->is_virtfn         = xen_host_pci_dev_is_virtfn(d);
     d->has_pcie_ext_caps = xen_host_pci_dev_has_pcie_ext_caps(d);
+
+    /* read and store PCIe Capabilities field for later use */
+    pcie_cap_pos = xen_host_pci_find_next_cap(d, 0, PCI_CAP_ID_EXP);
+
+    if (pcie_cap_pos) {
+        if (xen_host_pci_get_word(d, pcie_cap_pos + PCI_EXP_FLAGS,
+                                  &d->pcie_flags)) {
+            error_setg(&err, "Unable to read from PCI Express capability "
+                       "structure at 0x%x", pcie_cap_pos);
+            goto error;
+        }
+    } else {
+        d->pcie_flags = 0xFFFF;
+    }
 
     return;
 

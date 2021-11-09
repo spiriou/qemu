@@ -832,24 +832,18 @@ static XenPTRegInfo xen_pt_emu_reg_vendor[] = {
  * PCI Express Capability
  */
 
-static inline uint8_t get_capability_version(XenPCIPassthroughState *s,
-                                             uint32_t offset)
+static inline uint8_t get_pcie_capability_version(XenPCIPassthroughState *s)
 {
-    uint8_t flag;
-    if (xen_host_pci_get_byte(&s->real_device, offset + PCI_EXP_FLAGS, &flag)) {
-        return 0;
-    }
-    return flag & PCI_EXP_FLAGS_VERS;
+    assert(s->real_device.pcie_flags != 0xFFFF);
+
+    return (uint8_t) (s->real_device.pcie_flags & PCI_EXP_FLAGS_VERS);
 }
 
-static inline uint8_t get_device_type(XenPCIPassthroughState *s,
-                                      uint32_t offset)
+static inline uint8_t get_pcie_device_type(XenPCIPassthroughState *s)
 {
-    uint8_t flag;
-    if (xen_host_pci_get_byte(&s->real_device, offset + PCI_EXP_FLAGS, &flag)) {
-        return 0;
-    }
-    return (flag & PCI_EXP_FLAGS_TYPE) >> 4;
+    assert(s->real_device.pcie_flags != 0xFFFF);
+
+    return (uint8_t) ((s->real_device.pcie_flags & PCI_EXP_FLAGS_TYPE) >> 4);
 }
 
 /* initialize Link Control register */
@@ -857,8 +851,8 @@ static int xen_pt_linkctrl_reg_init(XenPCIPassthroughState *s,
                                     XenPTRegInfo *reg, uint32_t real_offset,
                                     uint32_t *data)
 {
-    uint8_t cap_ver = get_capability_version(s, real_offset - reg->offset);
-    uint8_t dev_type = get_device_type(s, real_offset - reg->offset);
+    uint8_t cap_ver  = get_pcie_capability_version(s);
+    uint8_t dev_type = get_pcie_device_type(s);
 
     /* no need to initialize in case of Root Complex Integrated Endpoint
      * with cap_ver 1.x
@@ -875,7 +869,7 @@ static int xen_pt_devctrl2_reg_init(XenPCIPassthroughState *s,
                                     XenPTRegInfo *reg, uint32_t real_offset,
                                     uint32_t *data)
 {
-    uint8_t cap_ver = get_capability_version(s, real_offset - reg->offset);
+    uint8_t cap_ver = get_pcie_capability_version(s);
 
     /* no need to initialize in case of cap_ver 1.x */
     if (cap_ver == 1) {
@@ -890,7 +884,7 @@ static int xen_pt_linkctrl2_reg_init(XenPCIPassthroughState *s,
                                      XenPTRegInfo *reg, uint32_t real_offset,
                                      uint32_t *data)
 {
-    uint8_t cap_ver = get_capability_version(s, real_offset - reg->offset);
+    uint8_t cap_ver = get_pcie_capability_version(s);
     uint32_t reg_field = 0;
 
     /* no need to initialize in case of cap_ver 1.x */
@@ -1590,8 +1584,8 @@ static int xen_pt_pcie_size_init(XenPCIPassthroughState *s,
                                  uint32_t base_offset, uint8_t *size)
 {
     PCIDevice *d = PCI_DEVICE(s);
-    uint8_t version = get_capability_version(s, base_offset);
-    uint8_t type = get_device_type(s, base_offset);
+    uint8_t version = get_pcie_capability_version(s);
+    uint8_t type = get_pcie_device_type(s);
     uint8_t pcie_size = 0;
 
 
