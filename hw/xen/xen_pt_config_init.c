@@ -23,11 +23,14 @@
 
 #define XEN_PT_INVALID_REG          0xFFFFFFFF      /* invalid register value */
 
-/* prototype */
+/* prototypes */
 
 static int xen_pt_ptr_reg_init(XenPCIPassthroughState *s, XenPTRegInfo *reg,
                                uint32_t real_offset, uint32_t *data);
-
+static int xen_pt_ext_cap_ptr_reg_init(XenPCIPassthroughState *s,
+                                       XenPTRegInfo *reg,
+                                       uint32_t real_offset,
+                                       uint32_t *data);
 
 /* helper */
 
@@ -1935,6 +1938,72 @@ out:
     *data = reg_field;
     return 0;
 }
+
+#define PCIE_EXT_CAP_NEXT_SHIFT 4
+#define PCIE_EXT_CAP_VER_MASK   0xF
+
+static int xen_pt_ext_cap_ptr_reg_init(XenPCIPassthroughState *s,
+                                       XenPTRegInfo *reg,
+                                       uint32_t real_offset,
+                                       uint32_t *data)
+{
+    int i, rc;
+    XenHostPCIDevice *d = &s->real_device;
+    uint16_t reg_field;
+    uint16_t cur_offset, version, cap_id;
+    uint32_t header;
+
+    if (real_offset < PCI_CONFIG_SPACE_SIZE) {
+        XEN_PT_ERR(&s->dev, "Incorrect PCIe extended capability offset"
+                   "encountered: 0x%04x\n", real_offset);
+        return -EINVAL;
+    }
+
+    rc = xen_host_pci_get_word(d, real_offset, &reg_field);
+    if (rc)
+        return rc;
+
+    /* preserve version field */
+    version    = reg_field & PCIE_EXT_CAP_VER_MASK;
+    cur_offset = reg_field >> PCIE_EXT_CAP_NEXT_SHIFT;
+
+    while (cur_offset && cur_offset != 0xFFF) {
+        rc = xen_host_pci_get_long(d, cur_offset, &header);
+        if (rc) {
+            XEN_PT_ERR(&s->dev, "Failed to read PCIe extended capability "
+                       "@0x%x (rc:%d)\n", cur_offset, rc);
+            return rc;
+        }
+
+        cap_id = PCI_EXT_CAP_ID(header);
+
+        for (i = 0; xen_pt_emu_reg_grps[i].grp_size != 0; i++) {
+            uint32_t cur_grp_id = xen_pt_emu_reg_grps[i].grp_id;
+
+            if (!IS_PCIE_EXT_CAP_ID(cur_grp_id))
+                continue;
+
+            if (xen_pt_hide_dev_cap(d, cur_grp_id))
+                continue;
+
+            if (GET_PCIE_EXT_CAP_ID(cur_grp_id) == cap_id) {
+                if (xen_pt_emu_reg_grps[i].grp_type == XEN_PT_GRP_TYPE_EMU)
+                    goto out;
+
+                /* skip TYPE_HARDWIRED capability, move the ptr to next one */
+                break;
+            }
+        }
+
+        /* next capability */
+        cur_offset = PCI_EXT_CAP_NEXT(header);
+    }
+
+out:
+    *data = (cur_offset << PCIE_EXT_CAP_NEXT_SHIFT) | version;
+    return 0;
+}
+
 
 
 /*************
