@@ -2181,6 +2181,174 @@ static int xen_pt_ext_cap_rebar_size_init(XenPCIPassthroughState *s,
     return ret;
 }
 
+/* get VC/VC9/MFVC Extended Capability register group size */
+static uint32_t get_arb_table_len_max(XenPCIPassthroughState *s,
+                                      uint32_t max_bit_supported,
+                                      uint32_t arb_cap)
+{
+    int n_bit;
+    uint32_t table_max_size = 0;
+
+    if (!arb_cap) {
+        return 0;
+    }
+
+    for (n_bit = 7; n_bit >= 0 && !(arb_cap & (1 << n_bit)); n_bit--);
+
+    if (n_bit > max_bit_supported) {
+        XEN_PT_ERR(&s->dev, "Warning: encountered unknown VC arbitration "
+                   "capability supported: 0x%02x\n", (uint8_t) arb_cap);
+    }
+
+    switch (n_bit) {
+    case 0: break;
+    case 1: return 32;
+    case 2: return 64;
+    case 3: /*128 too*/
+    case 4: return 128;
+    default:
+        table_max_size = 8 << n_bit;
+    }
+
+    return table_max_size;
+}
+
+#define GET_ARB_TABLE_OFFSET(x)           (((x) >> 24) * 0x10)
+#define GET_VC_ARB_CAPABILITY(x)          ((x) & 0xFF)
+#define ARB_TABLE_ENTRY_SIZE_BITS(x)      (1 << (((x) & PCI_VC_CAP1_ARB_SIZE)\
+                                          >> 10))
+static int xen_pt_ext_cap_vchan_size_init(XenPCIPassthroughState *s,
+                                          const XenPTRegGroupInfo *grp_reg,
+                                          uint32_t base_offset,
+                                          uint32_t *size)
+{
+    uint32_t header;
+    uint32_t vc_cap_max_size = PCIE_CONFIG_SPACE_SIZE - base_offset;
+    uint32_t next_ptr;
+    uint32_t arb_table_start_max = 0, arb_table_end_max = 0;
+    uint32_t port_vc_cap1, port_vc_cap2, vc_rsrc_cap;
+    uint32_t ext_vc_count = 0;
+    uint32_t arb_table_entry_size;  /* in bits */
+    const char *cap_name;
+    int ret;
+    int i;
+
+    ret = xen_host_pci_get_long(&s->real_device, base_offset, &header);
+    if (ret) {
+        goto err_read;
+    }
+
+    next_ptr = PCI_EXT_CAP_NEXT(header);
+
+    switch (PCI_EXT_CAP_ID(header)) {
+    case PCI_EXT_CAP_ID_VC:
+    case PCI_EXT_CAP_ID_VC9:
+        cap_name = "Virtual Channel";
+        break;
+    case PCI_EXT_CAP_ID_MFVC:
+        cap_name = "Multi-Function VC";
+        break;
+    default:
+        XEN_PT_ERR(&s->dev, "Unknown VC Extended Capability ID "
+                   "encountered: 0x%04x\n", PCI_EXT_CAP_ID(header));
+        return -1;
+    }
+
+    if (next_ptr && next_ptr > base_offset) {
+        vc_cap_max_size = next_ptr - base_offset;
+    }
+
+    ret = xen_host_pci_get_long(&s->real_device,
+                                base_offset + PCI_VC_PORT_CAP1,
+                                &port_vc_cap1);
+    if (ret) {
+        goto err_read;
+    }
+
+    ret = xen_host_pci_get_long(&s->real_device,
+                                base_offset + PCI_VC_PORT_CAP2,
+                                &port_vc_cap2);
+    if (ret) {
+        goto err_read;
+    }
+
+    ext_vc_count = port_vc_cap1 & PCI_VC_CAP1_EVCC;
+
+    arb_table_start_max = GET_ARB_TABLE_OFFSET(port_vc_cap2);
+
+    /* check arbitration table offset for validity */
+    if (arb_table_start_max >= vc_cap_max_size) {
+        XEN_PT_ERR(&s->dev, "Warning: VC arbitration table offset points "
+                   "outside the expected range: %#04x\n",
+                   (uint16_t) arb_table_start_max);
+        /* skip this arbitration table */
+        arb_table_start_max = 0;
+    }
+
+    if (arb_table_start_max) {
+        uint32_t vc_arb_cap = GET_VC_ARB_CAPABILITY(port_vc_cap2);
+        uint32_t num_phases = get_arb_table_len_max(s, 3, vc_arb_cap);
+        uint32_t arb_tbl_sz = QEMU_ALIGN_UP(num_phases * 4, 32) / 8;
+
+        arb_table_end_max = base_offset + arb_table_start_max + arb_tbl_sz;
+    }
+
+    /* get Function/Port Arbitration Table Entry size */
+    arb_table_entry_size = ARB_TABLE_ENTRY_SIZE_BITS(port_vc_cap1);
+
+    /* process all VC Resource entries */
+    for (i = 0; i < ext_vc_count; i++) {
+        uint32_t arb_table_offset;
+
+        /* read VC Resource Capability */
+        ret = xen_host_pci_get_long(&s->real_device,
+            base_offset + PCI_VC_RES_CAP + i * PCI_CAP_VC_PER_VC_SIZEOF,
+            &vc_rsrc_cap);
+        if (ret) {
+            goto err_read;
+        }
+
+        arb_table_offset = GET_ARB_TABLE_OFFSET(vc_rsrc_cap);
+
+        if (arb_table_offset > arb_table_start_max) {
+            /* check arbitration table offset for validity */
+            if (arb_table_offset >= vc_cap_max_size) {
+                XEN_PT_ERR(&s->dev, "Warning: Port/Function arbitration table "
+                           "offset points outside the expected range: %#04x\n",
+                           (uint16_t) arb_table_offset);
+                /* skip this arbitration table */
+                arb_table_offset = 0;
+            } else {
+                arb_table_start_max = arb_table_offset;
+            }
+
+            if (arb_table_offset) {
+                uint32_t vc_arb_cap = GET_VC_ARB_CAPABILITY(vc_rsrc_cap);
+                uint32_t num_phases = get_arb_table_len_max(s, 5, vc_arb_cap);
+                uint32_t arb_tbl_sz =
+                    QEMU_ALIGN_UP(num_phases * arb_table_entry_size, 32) / 8;
+
+                arb_table_end_max = base_offset + arb_table_offset + arb_tbl_sz;
+            }
+        }
+    }
+
+    if (arb_table_end_max) {
+        *size = arb_table_end_max - base_offset;
+    } else {
+        *size = PCI_CAP_VC_BASE_SIZEOF +
+                ext_vc_count * PCI_CAP_VC_PER_VC_SIZEOF;
+    }
+
+    log_pcie_extended_cap(s, cap_name, base_offset, *size);
+    return 0;
+
+err_read:
+    XEN_PT_ERR(&s->dev, "Error while reading VC Extended Capability\n");
+    return ret;
+}
+
+
 static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
     /* Header Type0 reg group */
     {
@@ -2518,6 +2686,30 @@ static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
         .grp_type   = XEN_PT_GRP_TYPE_HARDWIRED,
         .grp_size   = 0xFF,
         .size_init  = xen_pt_ext_cap_rebar_size_init,
+    },
+    /* Virtual Channel Extended Capability reg group (2) */
+    {
+        .grp_id     = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_VC),
+        .grp_type   = XEN_PT_GRP_TYPE_EMU,
+        .grp_size   = 0xFF,
+        .size_init  = xen_pt_ext_cap_vchan_size_init,
+        .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
+    },
+    /* Virtual Channel Extended Capability reg group (9) */
+    {
+        .grp_id     = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_VC9),
+        .grp_type   = XEN_PT_GRP_TYPE_EMU,
+        .grp_size   = 0xFF,
+        .size_init  = xen_pt_ext_cap_vchan_size_init,
+        .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
+    },
+    /* Multi-Function Virtual Channel Extended Capability reg group */
+    {
+        .grp_id     = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_MFVC),
+        .grp_type   = XEN_PT_GRP_TYPE_EMU,
+        .grp_size   = 0xFF,
+        .size_init  = xen_pt_ext_cap_vchan_size_init,
+        .emu_regs   = xen_pt_ext_cap_emu_reg_dummy,
     },
     {
         .grp_size = 0,
