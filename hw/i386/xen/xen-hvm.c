@@ -15,6 +15,7 @@
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_host.h"
 #include "hw/i386/pc.h"
+#include "hw/i386/ich9.h"
 #include "hw/southbridge/piix.h"
 #include "hw/irq.h"
 #include "hw/hw.h"
@@ -136,14 +137,14 @@ typedef struct XenIOState {
     Notifier wakeup;
 } XenIOState;
 
-/* Xen specific function for piix pci */
+/* Xen-specific functions for pci dev IRQ handling */
 
-int xen_pci_slot_get_pirq(PCIDevice *pci_dev, int irq_num)
+int xen_cmn_pci_slot_get_pirq(PCIDevice *pci_dev, int irq_num)
 {
     return irq_num + (PCI_SLOT(pci_dev->devfn) << 2);
 }
 
-void xen_piix3_set_irq(void *opaque, int irq_num, int level)
+void xen_cmn_set_irq(void *opaque, int irq_num, int level)
 {
     xen_set_pci_intx_level(xen_domid, 0, 0, irq_num >> 2,
                            irq_num & 3, level);
@@ -162,6 +163,31 @@ void xen_piix_pci_write_config_client(uint32_t address, uint32_t val, int len)
         v &= 0xf;
         if (((address + i) >= PIIX_PIRQCA) && ((address + i) <= PIIX_PIRQCD)) {
             xen_set_pci_link_route(xen_domid, address + i - PIIX_PIRQCA, v);
+        }
+    }
+}
+
+void xen_ich9_pci_write_config_client(uint32_t address, uint32_t val, int len)
+{
+    static bool pirqe_f_warned = false;
+
+    if (ranges_overlap(address, len, ICH9_LPC_PIRQA_ROUT, 4)) {
+        /* handle PIRQA..PIRQD routing */
+        xen_piix_pci_write_config_client(address, val, len);
+    } else if (ranges_overlap(address, len, ICH9_LPC_PIRQE_ROUT, 4)) {
+        while (len--) {
+            if (range_covers_byte(ICH9_LPC_PIRQE_ROUT, 4, address) &&
+                (val & 0x80) == 0) {
+                /* print warning only once */
+                if (!pirqe_f_warned) {
+                    pirqe_f_warned = true;
+                    fprintf(stderr, "WARNING: guest domain attempted to use PIRQ%c "
+                            "routing which is not supported for Xen/Q35 currently\n",
+                            (char)(address - ICH9_LPC_PIRQE_ROUT + 'E'));
+                    break;
+                }
+            }
+            address++, val >>= 8;
         }
     }
 }

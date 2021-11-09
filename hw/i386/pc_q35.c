@@ -260,9 +260,16 @@ static void pc_q35_init(MachineState *machine)
     for (i = 0; i < GSI_NUM_PINS; i++) {
         qdev_connect_gpio_out_named(lpc_dev, ICH9_GPIO_GSI, i, x86ms->gsi[i]);
     }
-    pci_bus_irqs(host_bus, ich9_lpc_set_irq, ich9_lpc_map_irq, ich9_lpc,
-                 ICH9_LPC_NB_PIRQS);
-    pci_bus_set_route_irq_fn(host_bus, ich9_route_intx_pin_to_irq);
+
+    if (xen_enabled()) {
+        pci_bus_irqs(host_bus, xen_cmn_set_irq, xen_cmn_pci_slot_get_pirq,
+                     ich9_lpc, ICH9_XEN_NUM_IRQ_SOURCES);
+    } else {
+        pci_bus_irqs(host_bus, ich9_lpc_set_irq, ich9_lpc_map_irq, ich9_lpc,
+                     ICH9_LPC_NB_PIRQS);
+        pci_bus_set_route_irq_fn(host_bus, ich9_route_intx_pin_to_irq);
+    }
+
     isa_bus = ich9_lpc->isa_bus;
 
     pc_i8259_create(isa_bus, gsi_state->i8259_irq);
