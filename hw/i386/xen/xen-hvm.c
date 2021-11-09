@@ -610,21 +610,65 @@ static void xen_io_del(MemoryListener *listener,
     memory_region_unref(mr);
 }
 
+static XenIOState *g_state = NULL;
+void xen_update_bus_mapping(PCIBus *bus);
+void xen_update_bus_mapping(PCIBus *bus)
+{
+    XenIOState *state = g_state;
+    PCIDevice *pci_dev;
+    PCIBus *cur_bus;
+    XenPciDevice *xendev, *next;
+
+    fprintf(stderr, "%s: entry\n", __func__);
+
+    QLIST_FOREACH_SAFE(xendev, &state->dev_list, entry, next) {
+        /* Check if device belongs to bus */
+	pci_dev = xendev->pci_dev;
+	cur_bus = pci_get_bus(pci_dev);
+	if (cur_bus != bus) {
+	    continue;
+	}
+	fprintf(stderr, "%s: FOUND device 0x%x 0x%x (%s)\n",
+		__func__,
+		pci_dev_bus_num(pci_dev),
+		pci_dev->devfn,
+		pci_dev->name);
+    }
+
+
+    QLIST_FOREACH_SAFE(xendev, &state->dev_list, entry, next) {
+        xen_unmap_pcidev(xen_domid, state->ioservid, xendev->sbdf);
+    }
+
+    /* Update devices BDF */
+
+    QLIST_FOREACH_SAFE(xendev, &state->dev_list, entry, next) {
+	pci_dev = xendev->pci_dev;
+        xendev->sbdf = PCI_BUILD_BDF(pci_dev_bus_num(pci_dev),
+                                     pci_dev->devfn);
+        xen_map_pcidev(xen_domid, state->ioservid, xendev->sbdf);
+    }
+}
+
 static void xen_device_realize(DeviceListener *listener,
                                DeviceState *dev)
 {
+    uint8_t bus;
+
     XenIOState *state = container_of(listener, XenIOState, device_listener);
 
     if (object_dynamic_cast(OBJECT(dev), TYPE_PCI_DEVICE)) {
         PCIDevice *pci_dev = PCI_DEVICE(dev);
         XenPciDevice *xendev = g_new(XenPciDevice, 1);
 
+        bus = pci_dev_bus_num(pci_dev);
+
         xendev->pci_dev = pci_dev;
-        xendev->sbdf = PCI_BUILD_BDF(pci_dev_bus_num(pci_dev),
-                                     pci_dev->devfn);
+        xendev->sbdf = PCI_BUILD_BDF(bus, pci_dev->devfn);
         QLIST_INSERT_HEAD(&state->dev_list, xendev, entry);
 
-        xen_map_pcidev(xen_domid, state->ioservid, pci_dev);
+        fprintf(stderr, "%s: REGISTER NEW DEVICE 0x%x\n", __func__, xendev->sbdf);
+        xen_map_pcidev(xen_domid, state->ioservid, xendev->sbdf);
     }
 }
 
@@ -637,10 +681,9 @@ static void xen_device_unrealize(DeviceListener *listener,
         PCIDevice *pci_dev = PCI_DEVICE(dev);
         XenPciDevice *xendev, *next;
 
-        xen_unmap_pcidev(xen_domid, state->ioservid, pci_dev);
-
         QLIST_FOREACH_SAFE(xendev, &state->dev_list, entry, next) {
             if (xendev->pci_dev == pci_dev) {
+                xen_unmap_pcidev(xen_domid, state->ioservid, xendev->sbdf);
                 QLIST_REMOVE(xendev, entry);
                 g_free(xendev);
                 break;
@@ -1435,6 +1478,7 @@ void xen_hvm_init_pc(PCMachineState *pcms, MemoryRegion **ram_memory)
     XenIOState *state;
 
     state = g_malloc0(sizeof (XenIOState));
+    g_state = state;
 
     state->xce_handle = xenevtchn_open(NULL, 0);
     if (state->xce_handle == NULL) {

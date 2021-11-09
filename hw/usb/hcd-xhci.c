@@ -30,8 +30,8 @@
 
 #include "hcd-xhci.h"
 
-//#define DEBUG_XHCI
-//#define DEBUG_DATA
+#define DEBUG_XHCI 1
+#define DEBUG_DATA 1
 
 #ifdef DEBUG_XHCI
 #define DPRINTF(...) fprintf(stderr, __VA_ARGS__)

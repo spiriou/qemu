@@ -25,6 +25,11 @@ void *pci_assign_dev_load_option_rom(PCIDevice *dev,
     void *ptr = NULL;
     Object *owner = OBJECT(dev);
 
+    XEN_PT_LOG(dev, "%s: entry %04x:%02x:%02x.%01x %s %d\n",
+               __func__,
+               domain, bus, slot, function,
+               dev->romfile?:"None", dev->rom_bar);
+
     /* If loading ROM from file, pci handles it */
     if (dev->romfile || !dev->rom_bar) {
         return NULL;

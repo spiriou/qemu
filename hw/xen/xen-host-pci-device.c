@@ -452,7 +452,7 @@ void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
     if (pcie_cap_pos) {
         if (xen_host_pci_get_word(d, pcie_cap_pos + PCI_EXP_FLAGS,
                                   &d->pcie_flags)) {
-            error_setg(&err, "Unable to read from PCI Express capability "
+            error_setg(errp, "Unable to read from PCI Express capability "
                        "structure at 0x%x", pcie_cap_pos);
             goto error;
         }

@@ -110,7 +110,7 @@ void acpi_set_pci_info(void)
     PCIBus *bus;
     unsigned bsel_alloc = ACPI_PCIHP_BSEL_DEFAULT;
 
-    fprintf(stderr, "%s: entry %d %p\n", bsel_is_set, host);
+    fprintf(stderr, "%s: entry %d %p\n", __func__, bsel_is_set, host);
 
     if (bsel_is_set) {
         return;
@@ -128,19 +128,19 @@ void acpi_set_pci_info(void)
     }
 }
 
-static void acpi_pcihp_disable_root_bus(void)
-{
-    Object *host = acpi_get_i386_pci_host();
-    PCIBus *bus;
-
-    bus = PCI_HOST_BRIDGE(host)->bus;
-    if (bus && qbus_is_hotpluggable(BUS(bus))) {
-        /* setting the hotplug handler to NULL makes the bus non-hotpluggable */
-        qbus_set_hotplug_handler(BUS(bus), NULL);
-    }
-
-    return;
-}
+// static void acpi_pcihp_disable_root_bus(void)
+// {
+//     Object *host = acpi_get_i386_pci_host();
+//     PCIBus *bus;
+// 
+//     bus = PCI_HOST_BRIDGE(host)->bus;
+//     if (bus && qbus_is_hotpluggable(BUS(bus))) {
+//         /* setting the hotplug handler to NULL makes the bus non-hotpluggable */
+//         qbus_set_hotplug_handler(BUS(bus), NULL);
+//     }
+// 
+//     return;
+// }
 
 static void acpi_pcihp_test_hotplug_bus(PCIBus *bus, void *opaque)
 {
@@ -282,9 +282,9 @@ static void acpi_pcihp_update(AcpiPciHpState *s)
 
 void acpi_pcihp_reset(AcpiPciHpState *s, bool acpihp_root_off)
 {
-    if (acpihp_root_off) {
-        acpi_pcihp_disable_root_bus();
-    }
+    // if (acpihp_root_off) {
+    //     acpi_pcihp_disable_root_bus();
+    // }
     acpi_set_pci_info();
     acpi_pcihp_update(s);
 }

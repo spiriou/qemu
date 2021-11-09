@@ -181,7 +181,7 @@ void xen_pt_setup_vga(XenPCIPassthroughState *s, XenHostPCIDevice *dev,
 
     bios = get_vgabios(s, &bios_size, dev);
     if (!bios) {
-        error_setg(errp, "VGA: Can't get VBIOS");
+        // error_setg(errp, "VGA: Can't get VBIOS");
         return;
     }
 

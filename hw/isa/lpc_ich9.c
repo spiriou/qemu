@@ -50,6 +50,7 @@
 #include "hw/core/cpu.h"
 #include "hw/nvram/fw_cfg.h"
 #include "qemu/cutils.h"
+#include "sysemu/xen.h"
 #include "hw/xen/xen.h"
 
 /*****************************************************************************/

@@ -35,6 +35,8 @@
 #include "hw/rtc/mc146818rtc.h"
 #include "sysemu/kvm.h"
 #include "hw/kvm/clock.h"
+#include "sysemu/xen.h"
+#include "hw/xen/xen.h"
 #include "hw/pci-host/q35.h"
 #include "hw/pci/pcie_port.h"
 #include "hw/qdev-properties.h"
@@ -54,6 +56,8 @@
 #include "hw/hyperv/vmbus-bridge.h"
 #include "hw/mem/nvdimm.h"
 #include "hw/i386/acpi-build.h"
+#include "hw/i386/fw_cfg.h"
+#include "hw/xen/xen-x86.h"
 
 /* ICH9 AHCI has 6 ports */
 #define MAX_SATA_PORTS     6
@@ -164,30 +168,34 @@ static void pc_q35_init(MachineState *machine)
         lowmem = 0xb0000000;
     }
 
-    /* Handle the machine opt max-ram-below-4g.  It is basically doing
-     * min(qemu limit, user limit).
-     */
-    if (!pcms->max_ram_below_4g) {
-        pcms->max_ram_below_4g = 4 * GiB;
-    }
-    if (lowmem > pcms->max_ram_below_4g) {
-        lowmem = pcms->max_ram_below_4g;
-        if (machine->ram_size - lowmem > lowmem &&
-            lowmem & (1 * GiB - 1)) {
-            warn_report("There is possibly poor performance as the ram size "
-                        " (0x%" PRIx64 ") is more then twice the size of"
-                        " max-ram-below-4g (%"PRIu64") and"
-                        " max-ram-below-4g is not a multiple of 1G.",
-                        (uint64_t)machine->ram_size, pcms->max_ram_below_4g);
-        }
-    }
-
-    if (machine->ram_size >= lowmem) {
-        x86ms->above_4g_mem_size = machine->ram_size - lowmem;
-        x86ms->below_4g_mem_size = lowmem;
+    if (xen_enabled()) {
+        xen_hvm_init_pc(pcms, &ram_memory);
     } else {
-        x86ms->above_4g_mem_size = 0;
-        x86ms->below_4g_mem_size = machine->ram_size;
+        /* Handle the machine opt max-ram-below-4g.  It is basically doing
+         * min(qemu limit, user limit).
+         */
+        if (!pcms->max_ram_below_4g) {
+            pcms->max_ram_below_4g = 4 * GiB;
+        }
+        if (lowmem > pcms->max_ram_below_4g) {
+            lowmem = pcms->max_ram_below_4g;
+            if (machine->ram_size - lowmem > lowmem &&
+                lowmem & (1 * GiB - 1)) {
+                warn_report("There is possibly poor performance as the ram size "
+                            " (0x%" PRIx64 ") is more then twice the size of"
+                            " max-ram-below-4g (%"PRIu64") and"
+                            " max-ram-below-4g is not a multiple of 1G.",
+                            (uint64_t)machine->ram_size, pcms->max_ram_below_4g);
+            }
+        }
+
+        if (machine->ram_size >= lowmem) {
+            x86ms->above_4g_mem_size = machine->ram_size - lowmem;
+            x86ms->below_4g_mem_size = lowmem;
+        } else {
+            x86ms->above_4g_mem_size = 0;
+            x86ms->below_4g_mem_size = machine->ram_size;
+        }
     }
 
     pc_machine_init_sgx_epc(pcms);
@@ -216,7 +224,21 @@ static void pc_q35_init(MachineState *machine)
     }
 
     /* allocate ram and load rom/bios */
-    pc_memory_init(pcms, get_system_memory(), rom_memory, &ram_memory);
+    if (!xen_enabled()) {
+        pc_memory_init(pcms, get_system_memory(),
+                       rom_memory, &ram_memory);
+    } else {
+        FWCfgState *fw_cfg;
+        pc_system_flash_cleanup_unused(pcms);
+
+        fw_cfg = fw_cfg_init_io_dma(FW_CFG_IO_BASE, FW_CFG_IO_BASE + 4,
+                                    &address_space_memory);
+        rom_set_fw(fw_cfg);
+        if (machine->kernel_filename != NULL) {
+            /* For xen HVM direct kernel boot, load linux here */
+            xen_load_linux(pcms);
+        }
+    }
 
     /* create pci host bus */
     q35_host = Q35_HOST_DEVICE(qdev_new(TYPE_Q35_HOST_DEVICE));
@@ -297,7 +319,7 @@ static void pc_q35_init(MachineState *machine)
 
     assert(pcms->vmport != ON_OFF_AUTO__MAX);
     if (pcms->vmport == ON_OFF_AUTO_AUTO) {
-        pcms->vmport = ON_OFF_AUTO_ON;
+        pcms->vmport = xen_enabled() ? ON_OFF_AUTO_OFF : ON_OFF_AUTO_ON;
     }
 
     /* init basic PC hardware */

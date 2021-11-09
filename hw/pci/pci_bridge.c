@@ -36,6 +36,7 @@
 #include "qemu/module.h"
 #include "qemu/range.h"
 #include "qapi/error.h"
+#include "sysemu/xen.h"
 
 /* PCI bridge subsystem vendor ID helper functions */
 #define PCI_SSVID_SIZEOF        8
@@ -155,6 +156,9 @@ static void pci_bridge_init_alias(PCIBridge *bridge, MemoryRegion *alias,
      * Apparently no way to do this with existing memory APIs. */
     pcibus_t size = enabled && limit >= base ? limit + 1 - base : 0;
 
+    fprintf(stderr, "%s: entry [%s] %d (0x%lx 0x%lx s=0x%lx)\n", __func__,
+            name, enabled, base, limit, size);
+
     memory_region_init_alias(alias, OBJECT(bridge), name, space, base, size);
     memory_region_add_subregion_overlap(parent_space, base, alias, 1);
 }
@@ -248,6 +252,9 @@ void pci_bridge_update_mappings(PCIBridge *br)
     memory_region_transaction_commit();
 }
 
+
+void xen_update_bus_mapping(PCIBus *bus);
+
 /* default write_config function for PCI-to-PCI bridge */
 void pci_bridge_write_config(PCIDevice *d,
                              uint32_t address, uint32_t val, int len)
@@ -256,6 +263,7 @@ void pci_bridge_write_config(PCIDevice *d,
     uint16_t oldctl = pci_get_word(d->config + PCI_BRIDGE_CONTROL);
     uint16_t newctl;
 
+    fprintf(stderr, "%s: entry a=0x%x v=0x%x l=0x%x\n", __func__, address, val, len);
     pci_default_write_config(d, address, val, len);
 
     if (ranges_overlap(address, len, PCI_COMMAND, 2) ||
@@ -270,6 +278,11 @@ void pci_bridge_write_config(PCIDevice *d,
         /* vga enable */
         ranges_overlap(address, len, PCI_BRIDGE_CONTROL, 2)) {
         pci_bridge_update_mappings(s);
+    }
+
+    if (xen_enabled() && ranges_overlap(address, len, PCI_SECONDARY_BUS, 1)) {
+        fprintf(stderr, "Xen bridge update\n");
+        xen_update_bus_mapping(pci_bridge_get_sec_bus(s));
     }
 
     newctl = pci_get_word(d->config + PCI_BRIDGE_CONTROL);

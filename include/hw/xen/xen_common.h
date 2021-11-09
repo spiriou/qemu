@@ -576,34 +576,28 @@ static inline void xen_unmap_io_section(domid_t dom,
 
 static inline void xen_map_pcidev(domid_t dom,
                                   ioservid_t ioservid,
-                                  PCIDevice *pci_dev)
+				  uint32_t bdf)
+                                  // PCIDevice *pci_dev)
 {
     if (use_default_ioreq_server) {
         return;
     }
 
-    trace_xen_map_pcidev(ioservid, pci_dev_bus_num(pci_dev),
-                         PCI_SLOT(pci_dev->devfn), PCI_FUNC(pci_dev->devfn));
+    trace_xen_map_pcidev(ioservid, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf));
     xendevicemodel_map_pcidev_to_ioreq_server(xen_dmod, dom, ioservid, 0,
-                                              pci_dev_bus_num(pci_dev),
-                                              PCI_SLOT(pci_dev->devfn),
-                                              PCI_FUNC(pci_dev->devfn));
+		    PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf));
 }
 
-static inline void xen_unmap_pcidev(domid_t dom,
-                                    ioservid_t ioservid,
-                                    PCIDevice *pci_dev)
+static inline void xen_unmap_pcidev(domid_t dom, ioservid_t ioservid,
+                                    uint32_t bdf)
 {
     if (use_default_ioreq_server) {
         return;
     }
 
-    trace_xen_unmap_pcidev(ioservid, pci_dev_bus_num(pci_dev),
-                           PCI_SLOT(pci_dev->devfn), PCI_FUNC(pci_dev->devfn));
+    trace_xen_unmap_pcidev(ioservid, PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf));
     xendevicemodel_unmap_pcidev_from_ioreq_server(xen_dmod, dom, ioservid, 0,
-                                                  pci_dev_bus_num(pci_dev),
-                                                  PCI_SLOT(pci_dev->devfn),
-                                                  PCI_FUNC(pci_dev->devfn));
+		    PCI_BUS_NUM(bdf), PCI_SLOT(bdf), PCI_FUNC(bdf));
 }
 
 static inline void xen_create_ioreq_server(domid_t dom,

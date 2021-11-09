@@ -293,8 +293,8 @@ static void xen_pt_pci_write_config(PCIDevice *d, uint32_t addr,
         if ((chk != XEN_PT_BAR_ALLF) &&
             (s->bases[index].bar_flag == XEN_PT_BAR_FLAG_UNUSED)) {
             XEN_PT_WARN(d, "Guest attempt to set address to unused "
-                        "Base Address Register. (addr: 0x%02x, len: %d)\n",
-                        addr, len);
+                        "Base Address Register. (addr: 0x%02x, len: %d, val: 0x%x)\n",
+                        addr, len, val);
         }
     }
 
@@ -514,6 +514,10 @@ static int xen_pt_register_regions(XenPCIPassthroughState *s, uint16_t *cmd)
 
     /* Register expansion ROM address */
     if (d->rom.base_addr && d->rom.size) {
+        XEN_PT_LOG(&s->dev, "SKIP Expansion ROM registered (size=0x%08"PRIx64
+                   " base_addr=0x%08"PRIx64")\n",
+                   d->rom.size, d->rom.base_addr);
+#if 0
         uint32_t bar_data = 0;
 
         /* Re-set BAR reported by OS, otherwise ROM can't be read. */
@@ -535,6 +539,7 @@ static int xen_pt_register_regions(XenPCIPassthroughState *s, uint16_t *cmd)
         XEN_PT_LOG(&s->dev, "Expansion ROM registered (size=0x%08"PRIx64
                    " base_addr=0x%08"PRIx64")\n",
                    d->rom.size, d->rom.base_addr);
+#endif
     }
 
     xen_pt_register_vga_regions(d);
@@ -858,15 +863,10 @@ static void xen_pt_realize(PCIDevice *d, Error **errp)
     s->io_listener = xen_pt_io_listener;
 
     /* Setup VGA bios for passthrough GFX */
-    if ((s->real_device.domain == 0) && (s->real_device.bus == 0) &&
-        (s->real_device.dev == 2) && (s->real_device.func == 0)) {
-        if (!is_igd_vga_passthrough(&s->real_device)) {
-            error_setg(errp, "Need to enable igd-passthru if you're trying"
-                    " to passthrough IGD GFX");
-            xen_host_pci_device_put(&s->real_device);
-            return;
-        }
-
+    if (is_igd_vga_passthrough(&s->real_device)) {
+        XEN_PT_LOG(d, "%04x:%02x:%02x.%d SETUP VGA PASSTHRU\n",
+                   s->real_device.domain, s->real_device.bus,
+                   s->real_device.dev, s->real_device.func);
         xen_pt_setup_vga(s, &s->real_device, errp);
         if (*errp) {
             error_append_hint(errp, "Setup VGA BIOS of passthrough"
@@ -875,8 +875,11 @@ static void xen_pt_realize(PCIDevice *d, Error **errp)
             return;
         }
 
-        /* Register ISA bridge for passthrough GFX. */
-        xen_igd_passthrough_isa_bridge_create(s, &s->real_device);
+        if ((s->real_device.domain == 0) && (s->real_device.bus == 0) &&
+            (s->real_device.dev == 2) && (s->real_device.func == 0)) {
+            /* Register ISA bridge for passthrough GFX. */
+            xen_igd_passthrough_isa_bridge_create(s, &s->real_device);
+        }
     }
 
     /* Handle real device's MMIO/PIO BARs */

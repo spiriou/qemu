@@ -859,11 +859,9 @@ static void machine_class_init(ObjectClass *oc, void *data)
         "Set on/off to enable/disable graphics emulation");
 
     object_class_property_add_bool(oc, "xen-platform-dev",
-        machine_get_xen_platform_dev,
-        machine_set_xen_platform_dev, &error_abort);
+        machine_get_xen_platform_dev, machine_set_xen_platform_dev);
     object_class_property_set_description(oc, "xen-platform-dev",
-        "Set on/off to enable/disable Xen Platform device",
-        &error_abort);
+        "Set on/off to enable/disable Xen Platform device");
 
     object_class_property_add_str(oc, "firmware",
         machine_get_firmware, machine_set_firmware);

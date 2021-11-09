@@ -61,6 +61,7 @@
 #include "hw/mem/nvdimm.h"
 #include "hw/i386/acpi-build.h"
 #include "kvm/kvm-cpu.h"
+#include "hw/i386/fw_cfg.h"
 
 #define MAX_IDE_BUS 2
 
@@ -185,7 +186,12 @@ static void pc_init1(MachineState *machine,
         pc_memory_init(pcms, system_memory,
                        rom_memory, &ram_memory);
     } else {
+        FWCfgState *fw_cfg;
         pc_system_flash_cleanup_unused(pcms);
+
+        fw_cfg = fw_cfg_init_io_dma(FW_CFG_IO_BASE, FW_CFG_IO_BASE + 4,
+                                    &address_space_memory);
+        rom_set_fw(fw_cfg);
         if (machine->kernel_filename != NULL) {
             /* For xen HVM direct kernel boot, load linux here */
             xen_load_linux(pcms);

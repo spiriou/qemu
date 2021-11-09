@@ -338,7 +338,7 @@ void ich9_pm_init(PCIDevice *lpc_pci, ICH9LPCPMRegs *pm,
                                  OBJECT(lpc_pci));
 
         // FIXME
-        acpi_set_pci_info();
+        // acpi_set_pci_info();
     }
 
     pm->irq = sci_irq;
