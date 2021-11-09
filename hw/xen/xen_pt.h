@@ -213,6 +213,7 @@ struct XenPCIPassthroughState {
 
     PCIHostDeviceAddress hostaddr;
     bool is_virtfn;
+    bool pcie_enabled_dev;
     bool permissive;
     bool permissive_warned;
     XenHostPCIDevice real_device;

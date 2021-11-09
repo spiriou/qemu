@@ -702,6 +702,21 @@ static const MemoryListener xen_pt_io_listener = {
     .priority = 10,
 };
 
+static inline bool xen_pt_dev_is_pcie_mode(PCIDevice *d)
+{
+    XenPCIPassthroughState *s = XEN_PT_DEVICE(d);
+    PCIBus *bus = pci_get_bus(d);
+
+    if (bus != NULL) {
+        if (pci_is_express(d) && pci_bus_is_express(bus) &&
+            xen_host_pci_find_next_cap(&s->real_device, 0, PCI_CAP_ID_EXP)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static void
 xen_igd_passthrough_isa_bridge_create(XenPCIPassthroughState *s,
                                       XenHostPCIDevice *dev)
@@ -808,8 +823,17 @@ static void xen_pt_realize(PCIDevice *d, Error **errp)
                    s->real_device.dev, s->real_device.func);
     }
 
-    /* Initialize virtualized PCI configuration (Extended 256 Bytes) */
-    memset(d->config, 0, PCI_CONFIG_SPACE_SIZE);
+    s->pcie_enabled_dev = xen_pt_dev_is_pcie_mode(d);
+    if (s->pcie_enabled_dev) {
+        XEN_PT_LOG(d, "Host device %04x:%02x:%02x.%d passed thru "
+                   "in PCIe mode\n", s->real_device.domain,
+                    s->real_device.bus, s->real_device.dev,
+                    s->real_device.func);
+    }
+
+    /* Initialize virtualized PCI configuration space (256/4K bytes) */
+    memset(d->config, 0, pci_is_express(d) ? PCIE_CONFIG_SPACE_SIZE
+                                           : PCI_CONFIG_SPACE_SIZE);
 
     s->memory_listener = xen_pt_memory_listener;
     s->io_listener = xen_pt_io_listener;
