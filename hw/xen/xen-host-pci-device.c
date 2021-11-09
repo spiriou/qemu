@@ -13,6 +13,7 @@
 
 #define XEN_HOST_PCI_MAX_EXT_CAP \
     ((PCIE_CONFIG_SPACE_SIZE - PCI_CONFIG_SPACE_SIZE) / (PCI_CAP_SIZEOF + 4))
+#define XEN_HOST_PCI_CAP_MAX 48
 
 #ifdef XEN_HOST_PCI_DEVICE_DEBUG
 #  define XEN_HOST_PCI_LOG(f, a...) fprintf(stderr, "%s: " f, __func__, ##a)
@@ -198,6 +199,19 @@ static bool xen_host_pci_dev_is_virtfn(XenHostPCIDevice *d)
     return !stat(path, &buf);
 }
 
+static bool xen_host_pci_dev_has_pcie_ext_caps(XenHostPCIDevice *d)
+{
+    uint32_t header;
+
+    if (xen_host_pci_get_long(d, PCI_CONFIG_SPACE_SIZE, &header))
+        return false;
+
+    if (header == 0 || header == ~0U)
+        return false;
+
+    return true;
+}
+
 static void xen_host_pci_config_open(XenHostPCIDevice *d, Error **errp)
 {
     char path[PATH_MAX];
@@ -296,37 +310,89 @@ int xen_host_pci_set_block(XenHostPCIDevice *d, int pos, uint8_t *buf, int len)
     return xen_host_pci_config_write(d, pos, buf, len);
 }
 
-int xen_host_pci_find_ext_cap_offset(XenHostPCIDevice *d, uint32_t cap)
+int xen_host_pci_find_next_ext_cap(XenHostPCIDevice *d, int pos, uint32_t cap)
 {
     uint32_t header = 0;
     int max_cap = XEN_HOST_PCI_MAX_EXT_CAP;
-    int pos = PCI_CONFIG_SPACE_SIZE;
+
+    if (!d->has_pcie_ext_caps)
+        return 0;
+
+    if (!pos) {
+        pos = PCI_CONFIG_SPACE_SIZE;
+    } else {
+        if (xen_host_pci_get_long(d, pos, &header))
+            return 0;
+
+        pos = PCI_EXT_CAP_NEXT(header);
+    }
 
     do {
-        if (xen_host_pci_get_long(d, pos, &header)) {
+        if (!pos || pos < PCI_CONFIG_SPACE_SIZE)
             break;
-        }
+
+        if (xen_host_pci_get_long(d, pos, &header))
+            break;
         /*
          * If we have no capabilities, this is indicated by cap ID,
          * cap version and next pointer all being 0.
+         * Also check for all F's returned (which means PCIe ext conf space
+         * is unreadable for some reason)
          */
-        if (header == 0) {
+        if (header == 0 || header == ~0U)
             break;
-        }
 
-        if (PCI_EXT_CAP_ID(header) == cap) {
+        if (cap == CAP_ID_ANY)
             return pos;
-        }
+        else if (PCI_EXT_CAP_ID(header) == cap)
+            return pos;
 
         pos = PCI_EXT_CAP_NEXT(header);
-        if (pos < PCI_CONFIG_SPACE_SIZE) {
+    } while (--max_cap);
+
+    return 0;
+}
+
+int xen_host_pci_find_next_cap(XenHostPCIDevice *d, int pos, uint32_t cap)
+{
+    uint8_t id;
+    unsigned max_cap = XEN_HOST_PCI_CAP_MAX;
+    uint8_t status = 0;
+    uint8_t curpos;
+
+    if (xen_host_pci_get_byte(d, PCI_STATUS, &status))
+        return 0;
+
+    if ((status & PCI_STATUS_CAP_LIST) == 0)
+        return 0;
+
+    if (pos < PCI_CAPABILITY_LIST) {
+        curpos = PCI_CAPABILITY_LIST;
+    } else {
+        curpos = (uint8_t) pos;
+    }
+
+    while (max_cap--) {
+        if (xen_host_pci_get_byte(d, curpos, &curpos))
             break;
-        }
+        if (!curpos)
+            break;
 
-        max_cap--;
-    } while (max_cap > 0);
+        if (cap == CAP_ID_ANY)
+            return curpos;
 
-    return -1;
+        if (xen_host_pci_get_byte(d, curpos + PCI_CAP_LIST_ID, &id))
+            break;
+
+        if (id == 0xff)
+            break;
+        else if (id == cap)
+            return curpos;
+
+        curpos += PCI_CAP_LIST_NEXT;
+    }
+
+    return 0;
 }
 
 void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
@@ -376,7 +442,8 @@ void xen_host_pci_device_get(XenHostPCIDevice *d, uint16_t domain,
     }
     d->class_code = v;
 
-    d->is_virtfn = xen_host_pci_dev_is_virtfn(d);
+    d->is_virtfn         = xen_host_pci_dev_is_virtfn(d);
+    d->has_pcie_ext_caps = xen_host_pci_dev_has_pcie_ext_caps(d);
 
     return;
 

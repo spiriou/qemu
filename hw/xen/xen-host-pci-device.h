@@ -32,6 +32,7 @@ typedef struct XenHostPCIDevice {
     XenHostPCIIORegion rom;
 
     bool is_virtfn;
+    bool has_pcie_ext_caps;
 
     int config_fd;
 } XenHostPCIDevice;
@@ -53,6 +54,8 @@ int xen_host_pci_set_long(XenHostPCIDevice *d, int pos, uint32_t data);
 int xen_host_pci_set_block(XenHostPCIDevice *d, int pos, uint8_t *buf,
                            int len);
 
-int xen_host_pci_find_ext_cap_offset(XenHostPCIDevice *s, uint32_t cap);
+#define CAP_ID_ANY  (~0U)
+int xen_host_pci_find_next_cap(XenHostPCIDevice *s, int pos, uint32_t cap);
+int xen_host_pci_find_next_ext_cap(XenHostPCIDevice *d, int pos, uint32_t cap);
 
 #endif /* XEN_HOST_PCI_DEVICE_H */
