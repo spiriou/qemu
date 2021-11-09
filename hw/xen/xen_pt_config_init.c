@@ -129,6 +129,18 @@ static uint32_t get_throughable_mask(const XenPCIPassthroughState *s,
     return throughable_mask & valid_mask;
 }
 
+static void log_pcie_extended_cap(XenPCIPassthroughState *s,
+                                  const char *cap_name,
+                                  uint32_t base_offset, uint32_t size)
+{
+    if (size) {
+        XEN_PT_LOG(&s->dev, "Found PCIe Extended Capability: %s at 0x%04x, "
+                            "size 0x%x bytes\n", cap_name,
+                            (uint16_t) base_offset, size);
+    }
+}
+
+
 /****************
  * general register functions
  */
@@ -1688,6 +1700,44 @@ static int xen_pt_ext_cap_capid_reg_init(XenPCIPassthroughState *s,
 }
 
 
+/* Vendor-specific Ext Capability Structure reg static information table */
+static XenPTRegInfo xen_pt_ext_cap_emu_reg_vendor[] = {
+    {
+        .offset     = XEN_PCIE_CAP_ID,
+        .size       = 2,
+        .init_val   = 0x0000,
+        .ro_mask    = 0xFFFF,
+        .emu_mask   = 0xFFFF,
+        .init       = xen_pt_ext_cap_capid_reg_init,
+        .u.w.read   = xen_pt_word_reg_read,
+        .u.w.write  = xen_pt_word_reg_write,
+    },
+    {
+        .offset     = XEN_PCIE_CAP_LIST_NEXT,
+        .size       = 2,
+        .init_val   = 0x0000,
+        .ro_mask    = 0xFFFF,
+        .emu_mask   = 0xFFFF,
+        .init       = xen_pt_ext_cap_ptr_reg_init,
+        .u.w.read   = xen_pt_word_reg_read,
+        .u.w.write  = xen_pt_word_reg_write,
+    },
+    {
+        .offset     = PCI_VNDR_HEADER,
+        .size       = 4,
+        .init_val   = 0x00000000,
+        .ro_mask    = 0xFFFFFFFF,
+        .emu_mask   = 0x00000000,
+        .init       = xen_pt_common_reg_init,
+        .u.dw.read  = xen_pt_long_reg_read,
+        .u.dw.write = xen_pt_long_reg_write,
+    },
+    {
+        .size = 0,
+    },
+};
+
+
 /****************************
  * Capabilities
  */
@@ -1710,6 +1760,23 @@ static int xen_pt_vendor_size_init(XenPCIPassthroughState *s,
     int ret = xen_host_pci_get_byte(&s->real_device, base_offset + 0x02, &sz);
 
     *size = sz;
+    return ret;
+}
+
+static int xen_pt_ext_cap_vendor_size_init(XenPCIPassthroughState *s,
+                                           const XenPTRegGroupInfo *grp_reg,
+                                           uint32_t base_offset,
+                                           uint32_t *size)
+{
+    uint32_t vsec_hdr = 0;
+    int ret = xen_host_pci_get_long(&s->real_device,
+                                    base_offset + PCI_VNDR_HEADER,
+                                    &vsec_hdr);
+
+    *size = PCI_VNDR_HEADER_LEN(vsec_hdr);
+
+    log_pcie_extended_cap(s, "Vendor-specific", base_offset, *size);
+
     return ret;
 }
 /* get PCI Express Capability Structure register group size */
@@ -1938,6 +2005,14 @@ static const XenPTRegGroupInfo xen_pt_emu_reg_grps[] = {
         .size_init   = xen_pt_reg_grp_size_init,
         .emu_regs    = xen_pt_emu_reg_igd_opregion,
     },
+    /* Vendor-specific Extended Capability reg group */
+    {
+        .grp_id      = PCIE_EXT_CAP_ID(PCI_EXT_CAP_ID_VNDR),
+        .grp_type    = XEN_PT_GRP_TYPE_EMU,
+        .grp_size    = 0xFF,
+        .size_init   = xen_pt_ext_cap_vendor_size_init,
+        .emu_regs    = xen_pt_ext_cap_emu_reg_vendor,
+    },
     {
         .grp_size = 0,
     },
@@ -2057,8 +2132,6 @@ out:
     *data = (cur_offset << PCIE_EXT_CAP_NEXT_SHIFT) | version;
     return 0;
 }
-
-
 
 /*************
  * Main
